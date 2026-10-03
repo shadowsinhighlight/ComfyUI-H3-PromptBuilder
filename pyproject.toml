@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-h3-promptbuilder"
 description = "Structured prompt construction for MiniMax H3 Ref2VA: subjects with drag-and-drop reference galleries, automatic Picture/Video/Audio numbering, a scene and shot library, and a linter."
-version = "1.0.0"
+version = "1.1.0"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
 dependencies = []

@@ -29,6 +29,8 @@ mistakes that otherwise fail quietly.
 - **Paste a whole prompt** from an LLM and have it split into sections
 - **Scene and shot library** saved with the workflow, with a scrollable browser
 - **Saved subjects** reusable across workflows, picked from a thumbnail list
+- **Subject packs** — export a subject's images and settings as one `.zip`
+  and restore it anywhere, even where none of the original files exist
 - **Linter** for numbering gaps, guillemets, missing timestamps, word count,
   unused subjects, missing files, and audio-reference leakage
 
@@ -141,6 +143,24 @@ description, roles and its image list — to disk, so it can be reused in other
 workflows. **▾ saved subjects** opens a picker showing each one with a thumbnail
 of its first image, its kind, image count, and a red note if any files are
 missing. **✕** in the picker deletes a saved subject.
+
+**Subject packs.** Saved subjects only remember file *paths*, so they break
+when the images aren't on disk — a new machine, a fresh install, a cleaned-out
+`input/` folder. A pack carries the images themselves.
+
+- **📦** exports the current subject as `<nickname>.h3pack.zip` and downloads it
+  through the browser. It contains every image in tray order plus a
+  `manifest.json` with nickname, kind, description, video role, voice mode and
+  retention settings.
+- **📂** imports a pack (or just **drop the `.zip` on the node**). The images
+  are unpacked into `ComfyUI/input/h3/<nickname>/`, the tray is restored in the
+  original order, and the subject's settings are filled back in.
+
+Re-importing a pack whose images are already there reuses the identical files
+rather than creating duplicates. Images that can't be found at export time are
+left out and reported. A pack is a plain zip, so it can be opened and inspected
+by hand; on import, file names are sanitised and nothing is written outside
+`input/h3/`.
 
 **Missing files.** If a workflow is opened where the images aren't present, each
 absent tile turns red and names the file, the router `report` lists
