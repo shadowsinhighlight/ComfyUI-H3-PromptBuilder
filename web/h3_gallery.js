@@ -195,11 +195,7 @@ async function savePreset(node) {
   const nick = (widget(node, "nickname")?.value ?? "").trim();
   const name = (window.prompt("Save subject as:", nick || "hero") || "").trim();
   if (!name) return;
-  const data = { images: readList(node) };
-  for (const f of PRESET_FIELDS) {
-    const w = widget(node, f);
-    if (w) data[f] = w.value;
-  }
+  const data = collectSubject(node);
   try {
     const res = await api.fetchApi("/h3/subjects", {
       method: "POST",
@@ -229,6 +225,130 @@ function applyPreset(node, name, data) {
       `"${name}" loaded, but ${data.missing.length} image file(s) are missing.`);
   } else {
     toast("success", "H3", `Loaded subject "${name}"`);
+  }
+}
+
+
+// ---- subject packs -------------------------------------------------------- //
+// A pack is a .zip holding the images plus a manifest with the subject's
+// fields and tray order, so a subject survives a move to another machine or a
+// fresh ComfyUI install where none of its input files exist.
+
+function isPack(f) {
+  return /\.zip$/i.test(f?.name || "") || /zip/.test(f?.type || "");
+}
+
+function collectSubject(node) {
+  const data = { images: readList(node) };
+  for (const f of PRESET_FIELDS) {
+    const w = widget(node, f);
+    if (w) data[f] = w.value;
+  }
+  return data;
+}
+
+async function exportPack(node) {
+  const data = collectSubject(node);
+  if (!data.images.length) {
+    toast("warn", "H3", "Nothing to export — this subject has no images.");
+    return;
+  }
+  node._h3busy = "packing…";
+  render(node);
+  try {
+    const res = await api.fetchApi("/h3/pack/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data }),
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const name = res.headers.get("X-H3-Filename") ||
+      `${(data.nickname || "subject").replace(/[^\w\-]/g, "_")}.h3pack.zip`;
+    const missing = parseInt(res.headers.get("X-H3-Missing") || "0", 10);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    if (missing > 0) {
+      toast("warn", "H3", `Exported ${name}, but ${missing} missing image(s) were left out.`);
+    } else {
+      toast("success", "H3", `Exported ${name}`);
+    }
+  } catch (e) {
+    toast("error", "H3 export failed", String(e));
+  } finally {
+    node._h3busy = null;
+    render(node);
+  }
+}
+
+async function importPack(node, file) {
+  const current = readList(node);
+  if (current.length &&
+      !window.confirm(`Replace the ${current.length} image(s) on this subject with the pack "${file.name}"?`)) {
+    return;
+  }
+  const body = new FormData();
+  body.append("pack", file, file.name);
+  node._h3busy = `unpacking ${file.name}…`;
+  render(node);
+  try {
+    const res = await api.fetchApi("/h3/pack/import", { method: "POST", body });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    for (const f of PRESET_FIELDS) {
+      const w = widget(node, f);
+      const v = data.fields?.[f];
+      if (w && v !== undefined) {
+        w.value = v;
+        if (w.inputEl) w.inputEl.value = v;
+      }
+    }
+    node._h3busy = null;
+    writeList(node, data.images || []);
+    const skipped = data.skipped?.length ? `, ${data.skipped.length} skipped` : "";
+    toast(data.skipped?.length ? "warn" : "success", "H3",
+      `Imported ${data.images.length} image(s) into ${data.folder}${skipped}`);
+  } catch (e) {
+    toast("error", "H3 import failed", String(e));
+  } finally {
+    node._h3busy = null;
+    render(node);
+  }
+}
+
+function pickPack(node) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".zip,application/zip";
+  input.style.display = "none";
+  document.body.appendChild(input);
+  input.addEventListener("change", async () => {
+    if (input.files?.[0]) await importPack(node, input.files[0]);
+    input.remove();
+  });
+  input.click();
+}
+
+/** Drops may hold images, a pack, or both. A pack wins: it carries its own
+ *  images and order, so mixing it with loose files would be ambiguous. */
+async function handleDrop(node, fileList) {
+  const files = Array.from(fileList || []);
+  const pack = files.find(isPack);
+  if (pack) {
+    if (files.length > 1) toast("info", "H3", "Pack found in drop — other files ignored.");
+    await importPack(node, pack);
+  } else {
+    await upload(node, files);
   }
 }
 
@@ -348,7 +468,21 @@ function render(node) {
     "padding:5px 9px;border-radius:5px;border:1px solid #4a4a4a;" +
     "background:#2e2e2e;color:#ddd;cursor:pointer;font-size:11px";
   saveBtn.onclick = () => savePreset(node);
-  presetBar.append(loadBtn, saveBtn);
+  const mkSmall = (txt, title, fn) => {
+    const b = document.createElement("button");
+    b.textContent = txt;
+    b.title = title;
+    b.style.cssText = saveBtn.style.cssText;
+    b.onclick = fn;
+    return b;
+  };
+  const exportBtn = mkSmall("📦",
+    "Export subject pack (.zip with all images + settings) to your computer",
+    () => exportPack(node));
+  const importBtn = mkSmall("📂",
+    "Import a subject pack (.zip) — restores images, order and settings. You can also drop the .zip on the node.",
+    () => pickPack(node));
+  presetBar.append(loadBtn, saveBtn, exportBtn, importBtn);
   root.appendChild(presetBar);
 
   const bar = document.createElement("div");
@@ -401,7 +535,7 @@ function render(node) {
 
   if (!list.length) {
     const hint = document.createElement("div");
-    hint.textContent = "drop images here";
+    hint.textContent = "drop images or a .h3pack.zip here";
     hint.style.cssText =
       `color:#6b7075;font-size:11px;display:flex;align-items:center;` +
       `justify-content:center;width:100%;height:${Math.min(size, 150)}px;` +
@@ -513,7 +647,7 @@ function render(node) {
     if (!e.dataTransfer.files?.length) return;
     e.preventDefault();
     e.stopPropagation();
-    await upload(node, e.dataTransfer.files);
+    await handleDrop(node, e.dataTransfer.files);
   });
 
   root.appendChild(grid);
@@ -574,7 +708,7 @@ app.registerExtension({
     };
     nodeType.prototype.onDragDrop = async function (e) {
       if (!e?.dataTransfer?.files?.length) return false;
-      await upload(this, e.dataTransfer.files);
+      await handleDrop(this, e.dataTransfer.files);
       return true;
     };
   },
