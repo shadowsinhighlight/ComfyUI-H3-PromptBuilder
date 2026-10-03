@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.DS_Store
+._*
+.ipynb_checkpoints/
+
+# runtime data written next to the pack
+input/
+h3_image_sets.json
+h3_subject_presets.json
